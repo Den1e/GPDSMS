@@ -84,7 +84,7 @@ namespace GPDSMS
                 serialPort.Open();
             }catch(Exception ex)
             {
-                MessageBox.Show(ex.Message, Application.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                sendToast("", ex.Message, 1);
             }
 
             sendToast("", "设备已连接", 1);
@@ -93,7 +93,11 @@ namespace GPDSMS
 
         public void CloseSerialPort()
         {
-            serialPort.Close();
+            try
+            {
+                serialPort.Close();
+            }
+            catch { }
         }
 
         public void SendDataMethod(byte[] data)
@@ -252,7 +256,7 @@ namespace GPDSMS
             textBox2.Text = SendDataMethod(textBox1.Text);
         }
 
-        private void AddShortcut(bool recreated = false)
+        private bool AddShortcut(bool recreated = false)
         {
             string pathToExe = Application.ExecutablePath;
             string commonStartMenuPath = Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu);
@@ -275,7 +279,7 @@ namespace GPDSMS
                 CloseSerialPort();
 
                 Application.Exit();
-                return;
+                return false;
 
             }
 
@@ -295,15 +299,17 @@ namespace GPDSMS
                     shortcut.Save();
 
                     sendToast("操作成功", "您已经拥有通知权限。", 5);
+
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show("请至少使用管理员权限运行一次，以帮助应用程序获取通知权限。", Application.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     Application.Exit();
-                    return;
+                    return false;
                 }
             }
-
+            return true;
         }
 
         protected void notificationOnActivated(ToastNotification notification, object obj)
@@ -406,7 +412,11 @@ namespace GPDSMS
 
             v10ToolStripMenuItem.Text = "v" + Application.ProductVersion;
 
-            AddShortcut();
+            if (!AddShortcut())
+            {
+                Application.Exit();
+                return;
+            }
 
             try
             {
@@ -414,7 +424,9 @@ namespace GPDSMS
             }
             catch (Exception ex)
             {
-
+                sendToast("提示信息", ex.Message, 3);
+                Application.Exit();
+                return;
             }
 
             SetSerialPort();
@@ -485,8 +497,12 @@ namespace GPDSMS
 
         private void Form1_FormClosed(object sender, FormClosedEventArgs e)
         {
-            SendDataMethod("AT+CMGD=1,4");
-            CloseSerialPort();
+            try
+            {
+                SendDataMethod("AT+CMGD=1,4");
+                CloseSerialPort();
+            }
+            catch { }
         }
 
         private void button4_Click(object sender, EventArgs e)
