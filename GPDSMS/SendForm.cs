@@ -12,13 +12,13 @@ namespace GPDSMS
 {
     public partial class SendForm : Form
     {
-        public SendForm(Form1 mainForm, String phoneNo, String message)
+        public SendForm(MainForm mainForm, String phoneNo, String message)
         {
             InitializeComponent();
             this.mainForm = mainForm;
 
             phoneNoText.Text = phoneNo;
-            orimessageText.Text = message;
+            orimessageText.Text = message.Replace("\r", Environment.NewLine);
 
             phoneNoText.ReadOnly = !phoneNo.Equals("");
 
@@ -27,10 +27,10 @@ namespace GPDSMS
                 phoneNoText.Text = "";
                 phoneNoText.ReadOnly = false;
             }
-
+            this.BringToFront();
         }
 
-        Form1 mainForm = null;
+        MainForm mainForm = null;
 
         private void button1_Click(object sender, EventArgs e)
         {
@@ -39,9 +39,15 @@ namespace GPDSMS
 
         private void button6_Click(object sender, EventArgs e)
         {
+            this.Hide();
             mainForm.SendMSM(phoneNoText.Text, messageText.Text);
             mainForm.HistoryFormRefreshList();
             this.Close();
+        }
+
+        private void SendForm_Load(object sender, EventArgs e)
+        {
+
         }
     }
 }

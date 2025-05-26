@@ -14,9 +14,9 @@ namespace GPDSMS
     public partial class HistoryForm : Form
     {
 
-        Form1 form1 = null;
+        MainForm form1 = null;
 
-        public HistoryForm(Form1 form1)
+        public HistoryForm(MainForm form1)
         {
             InitializeComponent();
             this.form1 = form1;
@@ -44,51 +44,50 @@ namespace GPDSMS
 
                 while (reader.Read())
                 {
-                    
 
-                    ListViewGroup group = null;
+                    //ListViewGroup group = null;
 
-                    if (reader.GetInt16(5) > 0)
-                    {
-                        foreach(ListViewGroup _group in listView1.Groups)
-                        {
-                            if(_group.Tag.Equals(reader.GetDateTime(3).ToString("yyyy年MM月dd HH时mm分")))
-                            {
-                                group = _group;
-                                break;
-                            }
-                        }
-                    }
+                    //if (reader.GetInt16(5) > 0)
+                    //{
+                    //    foreach(ListViewGroup _group in listView1.Groups)
+                    //    {
+                    //        if(_group.Tag.Equals(reader.GetDateTime(3).ToString("yyyy年MM月dd HH时mm分")))
+                    //        {
+                    //            group = _group;
+                    //            break;
+                    //        }
+                    //    }
+                    //}
 
-                    if (group == null)
-                    {
-                        group = new ListViewGroup();
+                    //if (group == null)
+                    //{
+                    //    group = new ListViewGroup();
 
-                        group.Header = reader.GetDateTime(3).ToString("yyyy年MM月dd HH时mm分");
+                    //    group.Header = reader.GetDateTime(3).ToString("yyyy年MM月dd HH时mm分");
 
-                        group.Tag = group.Header;
+                    //    group.Tag = group.Header;
 
-                        //if (reader.GetInt16(5) > 0)
-                        //{
-                        //    group.Tag = reader.GetInt16(5);
-                        //}
-                        //else
-                        //{
-                        //    group.Tag = reader.GetInt16(0);
-                        //}
+                    //    //if (reader.GetInt16(5) > 0)
+                    //    //{
+                    //    //    group.Tag = reader.GetInt16(5);
+                    //    //}
+                    //    //else
+                    //    //{
+                    //    //    group.Tag = reader.GetInt16(0);
+                    //    //}
 
-                        listView1.Groups.Add(group);
-                    }
+                    //    listView1.Groups.Add(group);
+                    //}
 
                     ListViewItem item = new ListViewItem();
 
-                    item.Group = group;
+                    //item.Group = group;
 
                     item.ImageIndex = 0;
 
                     item.Tag = reader.GetInt16(0);
 
-                    item.Text = reader.GetDateTime(3).ToString("T");
+                    item.Text = reader.GetDateTime(3).ToString();
                     item.Name = reader.GetInt16(0) + "";
 
                     String phoneNo = reader.GetString(1);

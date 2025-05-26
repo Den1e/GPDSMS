@@ -1,6 +1,7 @@
-﻿using IWshRuntimeLibrary;
+using IWshRuntimeLibrary;
 using Microsoft.Win32;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -10,6 +11,7 @@ using System.IO;
 using System.IO.Ports;
 using System.Linq;
 using System.Management;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -22,6 +24,54 @@ namespace GPDSMS
 {
     public partial class Form1 : Form
     {
+        private class MessagePages
+        {
+            public MessagePages(int total)
+            {
+                this.Total = total;
+                Pages = new String[total];
+            }
+
+            public int Total = 0;
+            public String PhoneNo = "";
+            public String Time = "";
+            public String[] Pages;
+
+            public Boolean IsComplete()
+            {
+                Boolean isComplete = true;
+
+                for (int i = 0; i < Pages.Length; i++)
+                {
+                    if (Pages[i] != null && !Pages[i].Equals(""))
+                    {
+                    }
+                    else
+                    {
+                        isComplete = false;
+                        break;
+                    }
+                }
+
+                return isComplete;
+            }
+
+            public void AppendPage(int orderNo, String phoneNo, String time, String content)
+            {
+                if(orderNo < Pages.Length && orderNo >= 0)
+                {
+                    Pages[orderNo - 1] = content;
+                    this.PhoneNo = phoneNo;
+                    this.Time = time;
+                }
+            }
+
+            public String GetContent()
+            {
+                return String.Join("", Pages);
+            }
+        }
+
         public Form1()
         {
             InitializeComponent();
@@ -41,18 +91,21 @@ namespace GPDSMS
         }
 
 
-        SerialPort serialPort = new SerialPort();
+        private SerialPort serialPort = new SerialPort();
 
-        PDUEncoding pdu = new PDUEncoding();
-        PDU pdu2 = new PDU();
+        private String receiveMessage = "";
 
-        String receiveMessage = "";
+        public Queue<String> receiveMessages = new Queue<String>();
 
-        String CenterNo = "";
+        public Object messagesLock = new Object();
 
-        bool isInSending = false;
+        private String CenterNo = "";
 
-        bool sendText = true;
+        private bool isInSending = false;
+
+        private Thread doMessageQueueThread;
+
+        private Hashtable messagePagesMap = new System.Collections.Hashtable();
 
         public void SetSerialPort()
         {
@@ -73,7 +126,7 @@ namespace GPDSMS
             serialPort.StopBits = StopBits.One;
 
             //串口接收数据事件
-            serialPort.DataReceived += ReceiveDataMethod;
+            serialPort.DataReceived += OnReceiveData;
         }
 
 
@@ -87,7 +140,7 @@ namespace GPDSMS
                 sendToast("", ex.Message, 1);
             }
 
-            sendToast("", "设备已连接", 1);
+            //sendToast("", "设备已连接", 1);
 
         }
 
@@ -110,9 +163,212 @@ namespace GPDSMS
             }
  
             serialPort.Write(data, 0, data.Length);
+
+            Thread.Sleep(100);
+        }
+
+        public void SendDataMethodNoLock(String data)
+        {
+            try
+            {
+                if (!serialPort.IsOpen)
+                {
+                    OpenSerialPort();
+                }
+                // 发送字符串
+                serialPort.Write(data + "\r");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"发送失败: {ex.Message}");
+            }
+            finally
+            {
+                Thread.Sleep(100);
+            }
         }
 
         public String SendDataMethod(String data)
+        {
+            try
+            {
+                if (!serialPort.IsOpen)
+                {
+                    OpenSerialPort();
+                }
+
+                int timeout = 0;
+
+
+                // 如果还有没被处理的行，则强制等待
+                while (receiveMessages.Count > 0)
+                {
+                    timeout += 1;
+                    // 超过5秒没处理，放弃
+                    if (timeout >= 50)
+                    {
+                        break;
+                        throw new Exception("队列有未处理的行，被抽取前无法执行");
+                    }
+
+                    Thread.Sleep(100);
+                }
+
+                // 发送字符串
+                serialPort.Write(data + "\r");
+
+                lock (messagesLock)
+                {
+                    timeout = 0;
+
+                    StringBuilder sb = new StringBuilder();
+
+                    // 获取结果
+                    while (true)
+                    {
+                        if (receiveMessages.Count > 0)
+                        {
+                            while (receiveMessages.Count > 0)
+                            {
+                                sb.AppendLine(receiveMessages.Dequeue());
+                            }
+
+                            return sb.ToString();
+                        }
+                        else
+                        {
+                            timeout += 1;
+                            // 超过5秒没输出，放弃
+                            if (timeout >= 50)
+                            {
+                                break;
+                            }
+                        }
+                        Thread.Sleep(100);
+                    }
+                }
+
+                return "";
+                
+            }catch(Exception ex)
+            {
+                Console.WriteLine($"发送失败: {ex.Message}");
+            }
+            finally
+            {
+                Thread.Sleep(100);
+            }
+
+            return "";
+        }
+
+        private void doMessageQueue()
+        {
+            while (true)
+            {
+                if (receiveMessages.Count > 0)
+                {
+                    lock (messagesLock)
+                    {
+                        while (receiveMessages.Count > 0)
+                        {
+                            String value = receiveMessages.Dequeue();
+
+                            //Console.WriteLine("==============================" + value);
+
+                            if (!value.Equals(""))
+                            {
+                                if (value.Contains("CMTI"))
+                                {
+                                    // 收到短信
+                                    String smsNo = value.Substring(value.LastIndexOf(",") + 1);
+
+                                    SendDataMethodNoLock("AT+CMGF=0");
+                                    SendDataMethodNoLock("AT+CMGR=" + smsNo);
+
+                                    Console.WriteLine("发送：" + smsNo);
+                                }
+                                else if (value.Equals("RING"))
+                                {
+                                    //value = SendDataMethod("AT+CLCC");
+                                    //String[] values = value.Split(',');
+                                    //value = values[values.Length - 2].Replace("\"", "").Trim();
+
+                                    //sendToast("来自 " + value + " 的电话", "正在呼叫", 3);
+                                }
+                                else if (value.StartsWith("+CMGR:"))
+                                {
+                                    // 检查value是否有短信结构
+                                    if (value.Length > 16)
+                                    {
+                                        value = value.Substring(value.IndexOf("\r\n") + 2);
+                                        value = value.Substring(0, value.IndexOf("\r\n"));
+
+                                        String phoneNo = "";
+                                        String content = "";
+                                        String time = "";
+
+                                        (phoneNo, time, content) = PDU.DecodeFullPdu(value);
+
+                                        if (!content.Equals(""))
+                                        {
+                                            int batchNo = 0;
+                                            int orderNo = 0;
+                                            byte[] bytes = Encoding.Unicode.GetBytes(content);
+                                            if (bytes[1] == 0x05 && bytes[0] == 0x00)
+                                            {
+                                                batchNo = bytes[2];
+                                                int total = bytes[5];
+                                                orderNo = bytes[4];
+
+                                                // 组合分页
+                                                MessagePages pages = null;
+                                                if (messagePagesMap.ContainsKey(phoneNo + Convert.ToString(batchNo)))
+                                                {
+
+                                                    pages = (MessagePages)messagePagesMap[phoneNo + Convert.ToString(batchNo)];
+                                                    if(pages.Total != total)
+                                                    {
+                                                        pages = new MessagePages(total);
+                                                        messagePagesMap[phoneNo + Convert.ToString(batchNo)] = pages;
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    pages = new MessagePages(total);
+                                                    messagePagesMap[phoneNo + Convert.ToString(batchNo)] = pages;
+                                                }
+
+                                                pages.AppendPage(orderNo, phoneNo, time, content.Substring(3));
+
+                                                if(pages.IsComplete())
+                                                {
+                                                    messagePagesMap.Remove(phoneNo + Convert.ToString(batchNo));
+
+                                                    Console.WriteLine("~~~~~~~~~~~~~~~~~~~~~~~收到分页文本：" + pages.GetContent());
+                                                    SaveSMS(phoneNo, pages.GetContent());
+                                                }
+                                            }
+                                            else
+                                            {
+                                                Console.WriteLine("~~~~~~~~~~~~~~~~~~~~~~~收到文本：" + content);
+                                                SaveSMS(phoneNo, content);
+                                            }
+
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+                }
+
+                Thread.Sleep(50);
+            }
+        }
+
+        public String SendDataMethod(String data, Boolean waitResult = true)
         {
             isInSending = true;
 
@@ -126,102 +382,107 @@ namespace GPDSMS
                     OpenSerialPort();
                 }
 
-                //判断读写模式
-                if (sendText)
+                //发送字符串
+                serialPort.Write(data + "\r");
+
+                // 等待
+                if (waitResult)
                 {
-                    //发送字符串
-                    serialPort.Write(data + "\r");
+
+                    String value = "null";
+                    int timeout = 0;
+
+                    while (true)
+                    {
+                        if (!receiveMessage.Equals(""))
+                        {
+                            value = receiveMessage;
+                            receiveMessage = "";
+                            break;
+                        }
+                        timeout += 1;
+                        if (timeout >= 50)
+                        {
+                            break;
+                        }
+                        Thread.Sleep(100);
+                    }
+
+                    return value;
                 }
                 else
                 {
-                    data = data.Replace(" ", "").Replace("\r\n", "");
-
-                    //将输入的16进制字符串两两分割为字符串集合
-                    var strArr = Regex.Matches(data, ".{2}").Cast<Match>().Select(m => m.Value);
-
-                    //需要发送的字节数组
-                    byte[] bytes = new byte[strArr.Count()];
-
-                    //循环索引
-                    int temp = 0;
-
-                    //将字符串集合转换为字节数组
-                    foreach (string item in strArr)
-                    {
-                        bytes[temp] = Convert.ToByte(item, 16);
-                        temp++;
-                    }
-
-                    //发送字节
-                    serialPort.Write(bytes, 0, data.Length);
+                    return "";
                 }
-
-                // 等待
-
-                String value = "null";
-                int timeout = 0;
-
-                while (true)
-                {
-                    if (!receiveMessage.Equals(""))
-                    {
-                        value = receiveMessage;
-                        receiveMessage = "";
-                        break;
-                    }
-                    timeout += 1;
-                    if (timeout >= 100)
-                    {
-                        break;
-                    }
-                    Thread.Sleep(50);
-                }
-
-                return value;
-            }            
+            }
             finally
             {
                 isInSending = false;
             }
+            
         }
 
-        private void ReceiveDataMethod(object sender, SerialDataReceivedEventArgs e)
+        private void OnReceiveData(object sender, SerialDataReceivedEventArgs e)
         {
             try
             {
                 byte[] result = new byte[serialPort.BytesToRead];
                 serialPort.Read(result, 0, serialPort.BytesToRead);
 
-
-                //string str = $"{DateTime.Now}\n";
-
-                String str = "\n";
-
-                //判断读写模式
-                //将接收到的字节数组转换为指定的消息格式
-                if (sendText)
-                {
-                    str += $"{Encoding.UTF8.GetString(result)}";
-                }
-                else
-                {
-                    for (int i = 0; i < result.Length; i++)
-                    {
-                        str += $"{result[i].ToString("X2")} ";
-                    }
-                }
-
-                SetReceiveMessage(str.Trim());
+                String str = $"{Encoding.UTF8.GetString(result)}";
+                receiveMessages.Enqueue(str.Trim());
             }
             catch (Exception ex)
             {
-
+                Console.WriteLine(ex.ToString());
             }
         }
 
-        private void SetReceiveMessage(String message)
+        private void SaveSMS(String phoneNo, String message)
         {
-            receiveMessage = message;
+            int id = 0;
+
+            SQLiteConnection conn = null;
+            try
+            {
+                conn = new SQLiteConnection("data source=" + Application.StartupPath + @"/storage.db");
+                conn.Open();
+
+                SQLiteCommand cmd = new SQLiteCommand();
+                cmd.Connection = conn;
+
+                cmd.CommandText = "INSERT INTO history(phone_no, create_date, message, type, batch_no, order_no, phone_to) VALUES(@phone_no, @create_date, @message, @type, @batch_no, @order_no, @phone_to)";
+                cmd.Parameters.Add("phone_no", DbType.String).Value = phoneNo;
+                cmd.Parameters.Add("phone_to", DbType.String).Value = "-";
+                cmd.Parameters.Add("create_date", DbType.DateTime).Value = DateTime.Now;
+                cmd.Parameters.Add("message", DbType.String).Value = message;
+                cmd.Parameters.Add("type", DbType.String).Value = "sms";
+                cmd.Parameters.Add("batch_no", DbType.Int16).Value = 0;
+                cmd.Parameters.Add("order_no", DbType.Int16).Value = 0;
+                cmd.ExecuteNonQuery();
+
+                cmd.CommandText = "SELECT LAST_INSERT_ROWID();";
+                SQLiteDataReader reader = cmd.ExecuteReader();
+                while (reader.Read())
+                {
+                    id = reader.GetInt16(0);
+                }
+                reader.Close();
+            }
+            catch (Exception ex)
+            {
+            }
+            finally
+            {
+                if (conn != null) conn.Close();
+            }
+
+            sendToast("来自 " + phoneNo + " 的短信", message, 3, id + "");
+
+            if (historyForm != null && historyForm.IsHandleCreated)
+            {
+                historyForm.RefreshList();
+            }
         }
 
         //delegate void SetReceiveMessageCallback(String message);
@@ -390,8 +651,22 @@ namespace GPDSMS
 
         private void Form1_Load(object sender, EventArgs e)
         {
+            //String phoneNo = "";
+            //String content = "";
+            //String time = "";
 
-            //PDU pdu2 = new PDU();
+            //(phoneNo, time, content) = PDU.DecodeFullPdu("069168515614066405A00110F00008525012800224238A05000322040300208BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA6237529E4E1A52A130014EA48BDD8D39FF0C63075C164E0070B967E54F59989D300167E56D4191CFFF0C70B951FB002000680074007400700073003A002F002F0075002E00310030003000310030002E0063006E002F006B");
+
+            //Console.WriteLine(content);
+
+            //Console.WriteLine("~~~~~~~~" + PDU.DecodeUnicode("069168515614066405A00110F00008525012800224238A05000322040300208BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA6237529E4E1A52A130014EA48BDD8D39FF0C63075C164E0070B967E54F59989D300167E56D4191CFFF0C70B951FB002000680074007400700073003A002F002F0075002E00310030003000310030002E0063006E002F006B"));
+
+            //byte[] bytes = Encoding.Unicode.GetBytes(content);
+
+            //Console.WriteLine(content);
+
+            this.Width = 0;
+            this.Height = 0;
 
             //String msgCenter = "";
             //String phone = "";
@@ -432,11 +707,12 @@ namespace GPDSMS
             SetSerialPort();
             OpenSerialPort();
 
+            doMessageQueueThread = new Thread(new ThreadStart(this.doMessageQueue));
+            doMessageQueueThread.Start();
+
             //String value = SendDataMethod("AT\r" + (char)0x1a);
 
             String value = SendDataMethod("AT");
-            //SendDataMethod("AT+CSCS=\"UCS2\"");
-
             if (!value.Contains("OK"))
             {
                 sendToast("提示信息", "连接失败", 3);
@@ -445,11 +721,9 @@ namespace GPDSMS
             }
 
             value = SendDataMethod("AT+CMGF=0");
-            //SendDataMethod("AT+CSCS=\"UCS2\"");
-
             if (!value.Contains("OK"))
             {
-                sendToast("提示信息", "CMGF连接失败", 3);
+                sendToast("提示信息", "CMGF设置失败", 3);
                 Application.Exit();
                 return;
             }
@@ -458,7 +732,16 @@ namespace GPDSMS
 
             if (!value.Contains("OK"))
             {
-                sendToast("提示信息", "CSCS连接失败", 3);
+                sendToast("提示信息", "CSCS设置失败", 3);
+                Application.Exit();
+                return;
+            }
+
+            value = SendDataMethod("AT+CPMS=\"ME\",\"ME\",\"ME\"");
+
+            if (!value.Contains("OK"))
+            {
+                sendToast("提示信息", "设置到模块存储失败", 3);
                 Application.Exit();
                 return;
             }
@@ -469,9 +752,11 @@ namespace GPDSMS
             value = value.Substring(value.IndexOf("\"") + 1);
             value = value.Substring(0, value.IndexOf("\""));
 
-            value = pdu.DecodeUCS2(value);
+            value = PDU.DecodeUnicode(value);
 
             CenterNo = value.Substring(1);
+
+            sendToast("", "设备已入网", 1);
 
 
             RegistryKey R_local = Registry.LocalMachine;
@@ -499,6 +784,7 @@ namespace GPDSMS
         {
             try
             {
+                // 清空存储的历史短信
                 SendDataMethod("AT+CMGD=1,4");
                 CloseSerialPort();
             }
@@ -535,26 +821,22 @@ namespace GPDSMS
             {
 
                 String value = SendDataMethod("AT+CMGF=0");
-                //SendDataMethod("AT+CSCS=\"UCS2\"");
-
                 if (!value.Contains("OK"))
                 {
-                    sendToast("提示信息", "CMGF连接失败", 3);
+                    sendToast("提示信息", "CMGF设置失败", 3);
                     return;
                 }
 
                 value = SendDataMethod("AT+CSCS=\"UCS2\"");
-
                 if (!value.Contains("OK"))
                 {
-                    sendToast("提示信息", "CSCS连接失败", 3);
+                    sendToast("提示信息", "CSCS设置失败", 3);
                     return;
                 }
 
-                string encodedSMS = pdu.smsEncodedsms(CenterNo, phoneNo, message);
+                (string encodedSMS, String len) = PDU.EncodeFullPdu(CenterNo, phoneNo, message);
 
-                value = SendDataMethod(String.Format("AT+CMGS={0}", pdu.nLength));
-
+                value = SendDataMethod(String.Format("AT+CMGS={0}", len));
                 if (!value.Contains(">"))
                 {
                     sendToast("提示信息", "发送失败", 3);
@@ -566,26 +848,43 @@ namespace GPDSMS
                 sendToast("", "短信已发送", 3);
             }else
             {
-                String value = SendDataMethod("AT+CMGF=1");
-
-                if (!value.Contains("OK"))
+                try
                 {
-                    sendToast("提示信息", "CMGF连接失败", 3);
-                    return;
+                    String value = SendDataMethod("AT+CMGF=1");
+                    if (!value.Contains("OK"))
+                    {
+                        sendToast("提示信息", "CMGF设置失败", 3);
+                        return;
+                    }
+
+                    value = SendDataMethod("AT+CSCS=\"GSM\"");
+                    if (!value.Contains("OK"))
+                    {
+                        sendToast("提示信息", "CSCS设置失败", 3);
+                        return;
+                    }
+
+                    value = SendDataMethod("AT+CMGS=\"" + phoneNo + "\"");
+                    value = SendDataMethod(message + (char)0x1a);
+                    if (!value.Contains((message)))
+                    {
+                        sendToast("提示信息", "短信发送失败", 3);
+                        return;
+                    }
+                    else
+                    {
+                        sendToast("", "短信已发送", 3);
+                    }
+                }
+                finally
+                {
+                    String value = SendDataMethod("AT+CMGF=0");
+                    if (!value.Contains("OK"))
+                    {
+                        sendToast("提示信息", "CMGF设置失败", 3);
+                    }
                 }
 
-                value = SendDataMethod("AT+CSCS=\"GSM\"");
-
-                if (!value.Contains("OK"))
-                {
-                    sendToast("提示信息", "CSCS连接失败", 3);
-                    return;
-                }
-
-                value = SendDataMethod("AT+CMGS=\"" + phoneNo + "\"");
-                value = SendDataMethod(message + (char)0x1a);
-
-                sendToast("", "短信已发送", 3);
             }
 
             SQLiteConnection conn = null;
@@ -636,50 +935,15 @@ namespace GPDSMS
 
         private void timer1_Tick(object sender, EventArgs e)
         {
-            if (!isInSending)
-            {
-                if (!receiveMessage.Equals(""))
-                {
-                    String value = receiveMessage;
-                    receiveMessage = "";
 
-                    if (value.Contains("CMTI"))
-                    {
-                        // 收到短信
-                        String smsNo = value.Substring(value.LastIndexOf(",") + 1);
-
-                        Console.WriteLine("-------------------------" + smsNo);
-                        //Console.WriteLine(value);
-
-                        textBox2.Text += value;
-
-                        unreadSmsNos.Add(smsNo);
-
-                        timer2.Stop();
-                        timer2.Start();
-
-
-                    }
-                    else if (value.Equals("RING"))
-                    {
-                        value = SendDataMethod("AT+CLCC");
-                        String[] values = value.Split(',');
-                        value = values[values.Length - 2].Replace("\"","").Trim();
-                        textBox2.Text += value;
-
-                        sendToast("来自 " + value + " 的电话", "正在呼叫", 3);
-                    }
-
-                }
-            }
         }
 
         private void button7_Click(object sender, EventArgs e)
         {
-            Console.WriteLine(pdu.GetDataTime("069168515614066405A00110F0000832103151238123880500030804038FD456DE4E3B83DC5355FF0C8BF753D19001201C00310030003000310030201D81F3003100300030003100303002000D000A002030108BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA62374EA48BDD8D39300167E54F59989D3001529E4E1A52A1FF0C514D6D4191CF770B"));
-            //Console.WriteLine(pdu.GetContent("0891683190106605F0240D91683169899137F400003210310070732309B1984C36B3D56837"));
-            Console.WriteLine(pdu.GetTelphone("069168515614066405A00110F0000832103151238123880500030804038FD456DE4E3B83DC5355FF0C8BF753D19001201C00310030003000310030201D81F3003100300030003100303002000D000A002030108BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA62374EA48BDD8D39300167E54F59989D3001529E4E1A52A1FF0C514D6D4191CF770B"));
-            Console.WriteLine(pdu.GetContent("069168515614066405A00110F0000832103151238123880500030804038FD456DE4E3B83DC5355FF0C8BF753D19001201C00310030003000310030201D81F3003100300030003100303002000D000A002030108BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA62374EA48BDD8D39300167E54F59989D3001529E4E1A52A1FF0C514D6D4191CF770B"));
+            //Console.WriteLine(pdu.GetDataTime("069168515614066405A00110F0000832103151238123880500030804038FD456DE4E3B83DC5355FF0C8BF753D19001201C00310030003000310030201D81F3003100300030003100303002000D000A002030108BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA62374EA48BDD8D39300167E54F59989D3001529E4E1A52A1FF0C514D6D4191CF770B"));
+            ////Console.WriteLine(pdu.GetContent("0891683190106605F0240D91683169899137F400003210310070732309B1984C36B3D56837"));
+            //Console.WriteLine(pdu.GetTelphone("069168515614066405A00110F0000832103151238123880500030804038FD456DE4E3B83DC5355FF0C8BF753D19001201C00310030003000310030201D81F3003100300030003100303002000D000A002030108BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA62374EA48BDD8D39300167E54F59989D3001529E4E1A52A1FF0C514D6D4191CF770B"));
+            //Console.WriteLine(pdu.GetContent("069168515614066405A00110F0000832103151238123880500030804038FD456DE4E3B83DC5355FF0C8BF753D19001201C00310030003000310030201D81F3003100300030003100303002000D000A002030108BA9670D52A166F467096E295EA6FF014F7F75284E2D56FD8054901A004100500050FF0C8DB34E0D51FA62374EA48BDD8D39300167E54F59989D3001529E4E1A52A1FF0C514D6D4191CF770B"));
         }
 
         private void notifyIcon1_MouseDoubleClick(object sender, MouseEventArgs e)
@@ -708,13 +972,13 @@ namespace GPDSMS
         {
             if (e.Button == MouseButtons.Right) { contextMenuStrip1.Show(); }
             if (e.Button == MouseButtons.Left) {
-                if (historyForm == null || !historyForm.IsHandleCreated)
-                {
-                    historyForm = new HistoryForm(this);
-                }
+                //if (historyForm == null || !historyForm.IsHandleCreated)
+                //{
+                //    historyForm = new HistoryForm(this);
+                //}
 
-                historyForm.RefreshList();
-                historyForm.Show();
+                //historyForm.RefreshList();
+                //historyForm.Show();
             }
         }
 
@@ -867,102 +1131,96 @@ namespace GPDSMS
             }
         }
 
+        //private void ReadSMS(String smsNo)
+        //{
+
+        //    String value = SendDataMethod("AT+CMGR=" + smsNo);
+
+        //    if (value.Length < 16)
+        //    {
+        //        return;
+        //    }
+
+        //    value = value.Substring(value.IndexOf("\r\n") + 2);
+        //    value = value.Substring(0, value.IndexOf("\r\n"));
+
+        //    String center = "";
+        //    String phoneNo = "";
+        //    String message = "";
+        //    String time = "";
+
+        //    String phoneTo = "-";
+
+        //    //pdu2.PDUDecoder(value, out center, out phoneNo, out message, out time);
+
+        //    if (!message.Equals(""))
+        //    {
+        //        int batchNo = 0;
+        //        int orderNo = 0;
+        //        byte[] bytes = Encoding.Unicode.GetBytes(message);
+        //        if (bytes[1] == 0x05 && bytes[0] == 0x00)
+        //        {
+        //            batchNo = bytes[2];
+        //            int total = bytes[5];
+        //            orderNo = bytes[4];
+
+        //            message = "(" + orderNo + "/" + total + ")" + message.Substring(3);
+        //        }
+
+
+        //        //textBox2.Text += time + "\n";
+        //        //textBox2.Text += phoneNo + "\n";
+        //        //textBox2.Text += message + "\n";
+
+        //        int id = -1;
+
+        //        SQLiteConnection conn = null;
+        //        try
+        //        {
+        //            conn = new SQLiteConnection("data source=" + Application.StartupPath + @"/storage.db");
+        //            conn.Open();
+
+        //            SQLiteCommand cmd = new SQLiteCommand();
+        //            cmd.Connection = conn;
+
+        //            cmd.CommandText = "INSERT INTO history(phone_no, create_date, message, type, batch_no, order_no, phone_to) VALUES(@phone_no, @create_date, @message, @type, @batch_no, @order_no, @phone_to)";
+        //            cmd.Parameters.Add("phone_no", DbType.String).Value = phoneNo;
+        //            cmd.Parameters.Add("phone_to", DbType.String).Value = phoneTo;
+        //            cmd.Parameters.Add("create_date", DbType.DateTime).Value = DateTime.Now;
+        //            cmd.Parameters.Add("message", DbType.String).Value = message;
+        //            cmd.Parameters.Add("type", DbType.String).Value = "sms";
+        //            cmd.Parameters.Add("batch_no", DbType.Int16).Value = batchNo;
+        //            cmd.Parameters.Add("order_no", DbType.Int16).Value = orderNo;
+        //            cmd.ExecuteNonQuery();
+
+        //            cmd.CommandText = "SELECT LAST_INSERT_ROWID();";
+        //            SQLiteDataReader reader = cmd.ExecuteReader();
+        //            while (reader.Read())
+        //            {
+        //                id = reader.GetInt16(0);
+        //            }
+        //            reader.Close();
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //        }
+        //        finally
+        //        {
+        //            if (conn != null) conn.Close();
+        //        }
+
+        //        //sendToast("来自 " + phoneNo + " 的短信", message, 3, id + "");
+
+        //        //if (historyForm != null && historyForm.IsHandleCreated)
+        //        //{
+        //        //    historyForm.RefreshList();
+        //        //}
+        //    }
+        //}
+
         private void timer2_Tick(object sender, EventArgs e)
         {
-            if (unreadSmsNos.Count > 0)
-            {
-                String value = SendDataMethod("AT+CMGF=0");
-
-                foreach (String smsNo in unreadSmsNos)
-                {
-                    value = SendDataMethod("AT+CMGR=" + smsNo);
-
-                    if(value.Length < 16)
-                    {
-                        continue;
-                    }
-
-                    value = value.Substring(value.IndexOf("\r\n") + 2);
-                    value = value.Substring(0, value.IndexOf("\r\n"));
-
-                    String center = "";
-                    String phoneNo = "";
-                    String message = "";
-                    String time = "";
-
-                    String phoneTo = "-";
-
-                    pdu2.PDUDecoder(value, out center, out phoneNo, out message, out time);
-
-                    if (!message.Equals(""))
-                    {
-                        int batchNo = 0;
-                        int orderNo = 0;
-                        byte[] bytes = Encoding.Unicode.GetBytes(message);
-                        if (bytes[1] == 0x05 && bytes[0] == 0x00)
-                        {
-                            batchNo = bytes[2];
-                            int total = bytes[5];
-                            orderNo = bytes[4];
-
-                            message = "(" + orderNo + "/" + total + ")" + message.Substring(3);
-                        }
-
-
-                        textBox2.Text += time + "\n";
-                        textBox2.Text += phoneNo + "\n";
-                        textBox2.Text += message + "\n";
-
-                        int id = -1;
-
-                        SQLiteConnection conn = null;
-                        try
-                        {
-                            conn = new SQLiteConnection("data source=" + Application.StartupPath + @"/storage.db");
-                            conn.Open();
-
-                            SQLiteCommand cmd = new SQLiteCommand();
-                            cmd.Connection = conn;
-
-                            cmd.CommandText = "INSERT INTO history(phone_no, create_date, message, type, batch_no, order_no, phone_to) VALUES(@phone_no, @create_date, @message, @type, @batch_no, @order_no, @phone_to)";
-                            cmd.Parameters.Add("phone_no", DbType.String).Value = phoneNo;
-                            cmd.Parameters.Add("phone_to", DbType.String).Value = phoneTo;
-                            cmd.Parameters.Add("create_date", DbType.DateTime).Value = DateTime.Now;
-                            cmd.Parameters.Add("message", DbType.String).Value = message;
-                            cmd.Parameters.Add("type", DbType.String).Value = "sms";
-                            cmd.Parameters.Add("batch_no", DbType.Int16).Value = batchNo;
-                            cmd.Parameters.Add("order_no", DbType.Int16).Value = orderNo;
-                            cmd.ExecuteNonQuery();
-
-                            cmd.CommandText = "SELECT LAST_INSERT_ROWID();";
-                            SQLiteDataReader reader = cmd.ExecuteReader();
-                            while (reader.Read())
-                            {
-                                id = reader.GetInt16(0);
-                            }
-                            reader.Close();
-                        }
-                        catch (Exception ex)
-                        {
-                        }
-                        finally
-                        {
-                            if (conn != null) conn.Close();
-                        }
-
-                        sendToast("来自 " + phoneNo + " 的短信", message, 3, id + "");
-
-                        if (historyForm != null && historyForm.IsHandleCreated)
-                        {
-                            historyForm.RefreshList();
-                        }
-                    }
-                }
-
-                
-                unreadSmsNos.Clear();
-                timer2.Stop();
-            }
+ 
         }
 
         private void button8_Click(object sender, EventArgs e)
@@ -1005,6 +1263,11 @@ namespace GPDSMS
         private void qQ56582083ToolStripMenuItem_Click(object sender, EventArgs e)
         {
             MessageBox.Show("不如和大力交个朋友", Application.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void button9_Click(object sender, EventArgs e)
+        {
+            SendDataMethod("ATD13969819734;");
         }
     }
 }

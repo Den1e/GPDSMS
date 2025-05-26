@@ -42,25 +42,26 @@
             // 
             // phoneNoText
             // 
-            this.phoneNoText.Location = new System.Drawing.Point(34, 44);
+            this.phoneNoText.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.phoneNoText.Location = new System.Drawing.Point(12, 39);
             this.phoneNoText.MaxLength = 11;
             this.phoneNoText.Name = "phoneNoText";
-            this.phoneNoText.Size = new System.Drawing.Size(288, 27);
+            this.phoneNoText.Size = new System.Drawing.Size(223, 27);
             this.phoneNoText.TabIndex = 1;
             // 
             // messageText
             // 
-            this.messageText.Location = new System.Drawing.Point(34, 291);
+            this.messageText.Location = new System.Drawing.Point(12, 286);
             this.messageText.Multiline = true;
             this.messageText.Name = "messageText";
             this.messageText.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.messageText.Size = new System.Drawing.Size(288, 107);
+            this.messageText.Size = new System.Drawing.Size(223, 65);
             this.messageText.TabIndex = 2;
             // 
             // label1
             // 
             this.label1.AutoSize = true;
-            this.label1.Location = new System.Drawing.Point(30, 21);
+            this.label1.Location = new System.Drawing.Point(8, 16);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(69, 20);
             this.label1.TabIndex = 13;
@@ -71,16 +72,16 @@
             this.label2.AutoSize = true;
             this.label2.Font = new System.Drawing.Font("微软雅黑", 7.8F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.label2.ForeColor = System.Drawing.SystemColors.ButtonShadow;
-            this.label2.Location = new System.Drawing.Point(105, 22);
+            this.label2.Location = new System.Drawing.Point(83, 17);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(163, 20);
+            this.label2.Size = new System.Drawing.Size(152, 19);
             this.label2.TabIndex = 14;
             this.label2.Text = "只支持中国大陆手机号码";
             // 
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(30, 268);
+            this.label4.Location = new System.Drawing.Point(8, 263);
             this.label4.Name = "label4";
             this.label4.Size = new System.Drawing.Size(105, 20);
             this.label4.TabIndex = 15;
@@ -88,7 +89,7 @@
             // 
             // button1
             // 
-            this.button1.Location = new System.Drawing.Point(238, 413);
+            this.button1.Location = new System.Drawing.Point(151, 367);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(84, 38);
             this.button1.TabIndex = 4;
@@ -99,7 +100,7 @@
             // label3
             // 
             this.label3.AutoSize = true;
-            this.label3.Location = new System.Drawing.Point(30, 87);
+            this.label3.Location = new System.Drawing.Point(8, 82);
             this.label3.Name = "label3";
             this.label3.Size = new System.Drawing.Size(69, 20);
             this.label3.TabIndex = 18;
@@ -107,20 +108,20 @@
             // 
             // orimessageText
             // 
-            this.orimessageText.Location = new System.Drawing.Point(34, 110);
+            this.orimessageText.Location = new System.Drawing.Point(12, 105);
             this.orimessageText.Multiline = true;
             this.orimessageText.Name = "orimessageText";
             this.orimessageText.ReadOnly = true;
             this.orimessageText.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.orimessageText.Size = new System.Drawing.Size(288, 138);
+            this.orimessageText.Size = new System.Drawing.Size(223, 138);
             this.orimessageText.TabIndex = 17;
             // 
             // button6
             // 
             this.button6.Image = global::GPDSMS.Properties.Resources.bullet_blue;
-            this.button6.Location = new System.Drawing.Point(34, 413);
+            this.button6.Location = new System.Drawing.Point(12, 367);
             this.button6.Name = "button6";
-            this.button6.Size = new System.Drawing.Size(198, 38);
+            this.button6.Size = new System.Drawing.Size(133, 38);
             this.button6.TabIndex = 3;
             this.button6.Text = "立刻发送";
             this.button6.TextImageRelation = System.Windows.Forms.TextImageRelation.ImageBeforeText;
@@ -131,7 +132,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(9F, 20F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(356, 466);
+            this.ClientSize = new System.Drawing.Size(247, 416);
             this.Controls.Add(this.label3);
             this.Controls.Add(this.orimessageText);
             this.Controls.Add(this.button1);
@@ -142,6 +143,7 @@
             this.Controls.Add(this.phoneNoText);
             this.Controls.Add(this.messageText);
             this.Font = new System.Drawing.Font("微软雅黑", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Margin = new System.Windows.Forms.Padding(3, 4, 3, 4);
             this.MaximizeBox = false;
@@ -150,6 +152,7 @@
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "短信编辑";
             this.TopMost = true;
+            this.Load += new System.EventHandler(this.SendForm_Load);
             this.ResumeLayout(false);
             this.PerformLayout();
 
